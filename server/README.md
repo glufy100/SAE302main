@@ -44,3 +44,38 @@ Le suivi reste actif apres la ligne d'arret. Chaque deplacement est refuse si le
 oriente de la voiture, augmente de la marge de securite, touche une autre voiture.
 Les trajets conflictuels sont reserves avant le depart de la ligne pour eviter un blocage
 au milieu du croisement. Les trajets paralleles sans conflit peuvent avancer ensemble.
+
+## Attente pendant le virage a gauche
+
+La voiture suit la courbe de virage d'origine, avec les memes points de controle,
+positions de voie et dimensions qu'avant l'ajout du rangement. Au vert, elle s'engage
+sur cette courbe et peut attendre a `POSITION_ATTENTE_GAUCHE` (40), avant de couper
+la circulation opposee. Elle reprend exactement la meme courbe quand la voie se libere.
+Il n'y a pas de poche de rangement ni de changement de trajectoire pour le tourne-a-gauche.
+
+Une voiture qui va tout droit prepare un depassement temporaire par la droite uniquement
+si la voiture juste devant est deja engagee dans son virage a gauche (progression 40),
+que le feu est vert et que la suivante est proche de la ligne. La preparation laterale
+s'effectue par petits pas, a progression longitudinale fixe, pour eviter tout saut de position.
+Un virage a droite ou un tout-droit intercale empeche ce declenchement, meme si un
+tourne-a-gauche se trouve plus loin dans la file.
+La voiture qui double retrouve sa trajectoire habituelle a `FIN_DEPASSEMENT_DROITE` (60). Le decalage a droite est termine avant la ligne, pour garder libre la fin du virage
+meme si le feu change. Le feu rouge, les distances et les contours restent controles. Deux virages
+a gauche en sens opposes sont reserves successivement pour eviter un blocage face a face.
+
+## Laisser passer une ambulance
+
+Les voitures non engagees devant une ambulance de la meme branche se rangent progressivement
+a droite dans le refuge lateral. L'ambulance reste sur sa voie et depasse la file rangee.
+Une voiture deja engagee termine sa traversee au lieu de se decaler au milieu du carrefour.
+
+`decalage_urgence` varie de 0 (sur la voie) a 1 (sur le cote), par pas de
+`PAS_RANGEMENT_URGENCE`. La progression longitudinale reste fixe pendant le rangement.
+Apres le passage de l'ambulance, le serveur attend que toute la zone de reinsertion soit
+libre avant de faire revenir la voiture, puis autorise sa reprise de route. Les mouvements
+lateraux utilisent les memes controles de collision que les deplacements habituels.
+
+Lorsqu'une urgence change les feux, la priorite a droite s'applique aux nouvelles entrees.
+Une voiture deja engagee peut terminer son virage : elle ne doit pas attendre une ambulance
+qui attend elle-meme que le carrefour se libere. L'espace protege devant une voiture
+engagee couvre la fin de son trajet, y compris pendant une attente au milieu du virage.

@@ -12,13 +12,13 @@ from server.model.VueCarrefourBase import VueCarrefourBase
 
 
 class RedemarrageTest(unittest.TestCase):
-    def test_distance_conservee_apres_engagement_meme_sorties_differentes(self):
+    def test_distance_conservee_pour_deux_voitures_dans_la_meme_file(self):
         etat = EtatCarrefour()
         etat.distances_affichage['test'] = {'S': 6}
         premiere = Vehicule('Premiere', 'voiture', 'S', '1', manoeuvre='GAUCHE',
                              progression=45, engagee=True)
-        suivante = Vehicule('Suivante', 'voiture', 'S', '2', manoeuvre='DROITE',
-                            progression=39, engagee=True)
+        suivante = Vehicule('Suivante', 'voiture', 'S', '2',
+                            progression=39, engagee=True, manoeuvre='GAUCHE')
         etat.vehicules = {v.nom: v for v in (premiere, suivante)}
         serveur = ServeurCarrefour(etat)
         client = Mock()
@@ -68,7 +68,7 @@ class RedemarrageTest(unittest.TestCase):
 
     def test_croisement_oppose_ne_bloque_pas_les_voitures_face_a_face(self):
         geometrie = (50, 950, 500, 282, 564, 120)
-        for manoeuvres in (('GAUCHE', 'GAUCHE'), ('GAUCHE', 'TOUT_DROIT'),
+        for manoeuvres in (('GAUCHE', 'GAUCHE'), ('GAUCHE', 'TOUT_DROIT'), ('GAUCHE', 'DROITE'),
                            ('TOUT_DROIT', 'TOUT_DROIT')):
             with self.subTest(manoeuvres=manoeuvres):
                 etat = EtatCarrefour()

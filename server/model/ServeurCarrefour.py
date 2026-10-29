@@ -1,7 +1,8 @@
+from dataclasses import replace
 import json
 import socket
 import threading
-from server.config import BIND_HOST, DEBUT_CENTRE, DISTANCE_SORTIE, FIN_CENTRE, LIGNE_ARRET, PAS_AVANCEMENT, PAS_SIMULATION, PORT
+from server.config import BIND_HOST, DEBUT_CENTRE, DISTANCE_SORTIE, FIN_CENTRE, LIGNE_ARRET, PAS_AVANCEMENT, PAS_SIMULATION, PORT, POSITION_ATTENTE_GAUCHE, PAS_RANGEMENT_URGENCE, PAS_PREPARATION_DEPASSEMENT
 from server.model.EtatCarrefour import EtatCarrefour
 from server.model.Vehicule import Vehicule
 from server.model.TrajectoireVehicule import TrajectoireVehicule
@@ -68,6 +69,8 @@ class ServeurCarrefour:
         for autre in self.etat.vehicules.values():
             if autre.nom == vehicule.nom or autre.progression >= 100:
                 continue
+            if autre.manoeuvre == "GAUCHE" and autre.progression <= POSITION_ATTENTE_GAUCHE:
+                continue
             if autre.direction_sortie() != vehicule.direction_sortie():
                 continue
             if (autre.progression >= DEBUT_CENTRE
@@ -76,6 +79,89 @@ class ServeurCarrefour:
                 return True
         return False
 
+    def _attend_la_circulation_opposee(self, vehicule):
+        """Un tourne-a-gauche cede aux vehicules venant en face au vert."""
+        opposee = {"N": "S", "S": "N", "E": "O", "O": "E"}[vehicule.direction]
+        return any(
+            autre.direction == opposee
+            and autre.manoeuvre != "GAUCHE"
+            and LIGNE_ARRET <= autre.progression <= FIN_CENTRE
+            and (autre.engagee or self.etat.feux[opposee] == "VERT")
+            for autre in self.etat.vehicules.values()
+        )
+
+    def _ranger_pour_urgence(self, vehicule):
+        """Range les voitures a droite puis les remet sur leur voie apres l'urgence.
+
+        Appelee sous verrou. La progression reste fixe pendant cette manoeuvre,
+        les demandes POSITION suivantes animent le decalage lateral.
+        """
+        if vehicule.prioritaire or vehicule.engagee:
+            return False
+        marge = self.etat.distance_securite(vehicule.direction)
+        doit_laisser_passer = any(
+            autre.prioritaire and autre.direction == vehicule.direction
+            and autre.nom != vehicule.nom and autre.progression < 100
+            and autre.progression < vehicule.progression + marge
+            for autre in self.etat.vehicules.values()
+        )
+        if not doit_laisser_passer and vehicule.decalage_urgence == 0:
+            vehicule.retour_voie = False
+            return False
+        if doit_laisser_passer:
+            vehicule.retour_voie = False
+        elif not vehicule.retour_voie:
+            if TrajectoireVehicule.reinsertion_occupee(
+                vehicule, self.etat.vehicules.values(), self.etat.geometries_affichage.values(),
+            ):
+                return True
+            vehicule.retour_voie = True
+        if doit_laisser_passer:
+            decalage = min(1.0, round(vehicule.decalage_urgence + PAS_RANGEMENT_URGENCE, 2))
+        else:
+            decalage = max(0.0, round(vehicule.decalage_urgence - PAS_RANGEMENT_URGENCE, 2))
+        if not TrajectoireVehicule.mouvement_occupe(
+            vehicule, vehicule.progression, self.etat.vehicules.values(),
+            self.etat.geometries_affichage.values(), decalage_urgence=decalage,
+        ):
+            vehicule.decalage_urgence = decalage
+        return True
+
+    def _preparer_depassement(self, vehicule, feu_vert):
+        """Commence l'ecart pres de la ligne, apres l'engagement du tourne-a-gauche."""
+        if (vehicule.prioritaire or vehicule.manoeuvre != "TOUT_DROIT"
+                or vehicule.progression > LIGNE_ARRET or vehicule.decalage_urgence > 0):
+            return False
+        if not vehicule.depassement_droite:
+            if not feu_vert or vehicule.progression < LIGNE_ARRET - self.etat.distance_securite(vehicule.direction):
+                return False
+            voiture_devant = min(
+                (autre for autre in self.etat.vehicules.values()
+                 if autre.nom != vehicule.nom and autre.direction == vehicule.direction
+                 and autre.decalage_urgence < 1.0
+                 and vehicule.progression < autre.progression < 100),
+                key=lambda autre: autre.progression,
+                default=None,
+            )
+            if (voiture_devant is None or voiture_devant.manoeuvre != "GAUCHE"
+                    or voiture_devant.prioritaire or not voiture_devant.engagee
+                    or not POSITION_ATTENTE_GAUCHE <= voiture_devant.progression <= FIN_CENTRE):
+                return False
+            vehicule.depassement_droite = True
+            vehicule.preparation_depassement = 0.0
+        if vehicule.preparation_depassement >= 1.0:
+            return False
+        # L'ecart se fait progressivement, a progression longitudinale fixe.
+        # Un declenchement plus tardif ne provoque donc pas de saut de position.
+        preparation = min(1.0, round(vehicule.preparation_depassement + PAS_PREPARATION_DEPASSEMENT, 2))
+        proposition = replace(vehicule, preparation_depassement=preparation)
+        if not TrajectoireVehicule.mouvement_occupe(
+            proposition, vehicule.progression, self.etat.vehicules.values(),
+            self.etat.geometries_affichage.values(),
+        ):
+            vehicule.preparation_depassement = preparation
+        return True
+
     def _avancer_vehicule(self, client: socket.socket, vehicule: Vehicule, prochaine_position: int):
         """Accepte ou refuse le prochain pas propose par le vehicule."""
         if not isinstance(vehicule, Vehicule):
@@ -83,10 +169,21 @@ class ServeurCarrefour:
 
         with self.etat.verrou:
             feu_vert = self.etat.feux[vehicule.direction] == "VERT"
-            entre_dans_le_carrefour = not vehicule.engagee and prochaine_position > LIGNE_ARRET
+            commence_le_virage = (vehicule.manoeuvre == "GAUCHE"
+                                  and vehicule.progression <= POSITION_ATTENTE_GAUCHE < prochaine_position)
+            entre_dans_le_carrefour = (not vehicule.engagee and prochaine_position > LIGNE_ARRET)
+            doit_reserver = entre_dans_le_carrefour or commence_le_virage
             reponse = ""
 
             if not vehicule.progression < prochaine_position <= min(vehicule.progression + PAS_AVANCEMENT, 100):
+                reponse = "ATTENTE"
+
+            # Une demande immobile au rouge peut tout de meme animer le
+            # rangement ou la reinsertion, sans franchir la ligne d'arret.
+            if (not reponse or prochaine_position == vehicule.progression) and self._ranger_pour_urgence(vehicule):
+                reponse = "ATTENTE"
+
+            if not reponse and self._preparer_depassement(vehicule, feu_vert):
                 reponse = "ATTENTE"
 
             if not reponse:
@@ -95,6 +192,8 @@ class ServeurCarrefour:
                     for autre in self.etat.vehicules.values()
                     if autre.nom != vehicule.nom
                     and autre.direction == vehicule.direction
+                    and autre.decalage_urgence < 1.0
+                    and not (autre.virage_gauche_entame() and vehicule.manoeuvre != "GAUCHE")
                     and vehicule.progression < autre.progression < 100
                 ]
 
@@ -111,20 +210,26 @@ class ServeurCarrefour:
                     # La ligne d'arret ne dispense pas du controle des contours.
                     # La position est appliquee uniquement apres tous les controles.
                     prochaine_position = min(prochaine_position, LIGNE_ARRET)
-                    entre_dans_le_carrefour = prochaine_position > LIGNE_ARRET
+                    doit_reserver = prochaine_position > LIGNE_ARRET
 
-            if not reponse and entre_dans_le_carrefour:
+            if not reponse and commence_le_virage and self._attend_la_circulation_opposee(vehicule):
+                reponse = "ATTENTE"
+
+            if not reponse and doit_reserver:
                 carrefour_occupe = any(
                     autre.nom != vehicule.nom
                     and autre.direction != vehicule.direction
                     and autre.engagee
                     and autre.progression <= FIN_CENTRE
                     and TrajectoireVehicule.trajets_en_conflit(
-                        vehicule, autre, self.etat.geometries_affichage.values())
+                        replace(vehicule, progression=prochaine_position), autre,
+                        self.etat.geometries_affichage.values())
                     for autre in self.etat.vehicules.values()
                 )
 
-                vehicule_prioritaire_a_droite = any(
+                # Une voiture deja engagee doit pouvoir finir de degager
+                # avant de ceder au nouveau vert d'une urgence.
+                vehicule_prioritaire_a_droite = not vehicule.engagee and any(
                     autre.direction == self._direction_a_droite(vehicule.direction)
                     and not autre.engagee
                     and autre.progression >= LIGNE_ARRET

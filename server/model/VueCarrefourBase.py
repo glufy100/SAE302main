@@ -104,6 +104,26 @@ class VueCarrefourBase(QWidget):
 
     _position_vehicule = staticmethod(TrajectoireVehicule._position_vehicule)
 
+    def _dessiner_refuges_urgence(self, peintre, geometrie, haut_stem=None):
+        """Bandes laterales ou se rangent les voitures devant une ambulance."""
+        gauche, droite, cx, cy, bas, epaisseur = geometrie
+        demi = epaisseur / 2
+        bord = epaisseur * 0.85
+        arret = demi + max(4.0, epaisseur * 0.05)
+        refuges = {
+            "S": QRectF(cx + demi, cy + arret, bord - demi, bas - cy - arret),
+            "E": QRectF(cx + arret, cy - bord, droite - cx - arret, bord - demi),
+            "O": QRectF(gauche, cy + demi, cx - arret - gauche, bord - demi),
+        }
+        if haut_stem is not None:
+            refuges["N"] = QRectF(cx - bord, haut_stem, bord - demi, cy - arret - haut_stem)
+        peintre.save()
+        peintre.setPen(Qt.PenStyle.NoPen)
+        peintre.setBrush(self.COULEUR_ROUTE.lighter(115))
+        for direction in self.etat.trajets:
+            peintre.drawRect(refuges[direction])
+        peintre.restore()
+
     def _dessiner_vehicules(self, peintre, vehicules, gauche, droite, centre_x,
                             centre_y, bas_stem, epaisseur, haut_stem=None):
         """Affiche les positions validees par le serveur, y compris les urgences."""

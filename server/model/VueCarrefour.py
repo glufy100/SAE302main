@@ -18,8 +18,9 @@ class VueCarrefour(VueCarrefourBase):
         demi = epaisseur / 2
         feux, vehicules = self._etat_affichage(geometrie, haut)
 
-        self._dessiner_decor(peintre, gauche, droite, haut, bas, centre_x, centre_y, demi)
+        self._dessiner_decor(peintre, gauche, droite, haut, bas, centre_x, centre_y, epaisseur * 0.85)
         self._dessiner_routes(peintre, gauche, droite, haut, bas, centre_x, centre_y, epaisseur)
+        self._dessiner_refuges_urgence(peintre, geometrie, haut)
         self._dessiner_marquages(peintre, gauche, droite, haut, bas, centre_x, centre_y, epaisseur)
         self._dessiner_feux(peintre, gauche, droite, haut, bas, centre_x, centre_y, demi, feux)
         self._dessiner_vehicules(peintre, vehicules, *geometrie, haut)
@@ -77,9 +78,9 @@ class VueCarrefour(VueCarrefourBase):
     def _dessiner_feux(self, peintre, gauche, droite, haut, bas, centre_x, centre_y, demi, feux):
         """Utilise le meme dessin de feu que le carrefour en T."""
         for direction, x, y in (
-            ("N", centre_x - demi - 30, haut),
-            ("S", centre_x + demi + 30, bas - 70),
-            ("E", droite - 35, centre_y - demi - 85),
-            ("O", gauche + 35, centre_y + demi + 20),
+            ("N", centre_x - demi * 1.7 - 30, haut),
+            ("S", centre_x + demi * 1.7 + 30, bas - 70),
+            ("E", droite - 35, centre_y - demi * 1.7 - 85),
+            ("O", gauche + 35, centre_y + demi * 1.7 + 20),
         ):
             self._dessiner_feu(peintre, direction, x, y, feux[direction] == "VERT")
