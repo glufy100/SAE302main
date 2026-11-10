@@ -1,13 +1,13 @@
-"""Verifie les distances des files et leur application par le serveur."""
+"""Verifie les distances des files et leur application par le clients."""
 
 import unittest
 from unittest.mock import Mock
 
-from server.config import LIGNE_ARRET
-from server.model.EtatCarrefour import EtatCarrefour
-from server.model.ServeurCarrefour import ServeurCarrefour
-from server.model.Vehicule import Vehicule
-from server.model.VueCarrefourBase import VueCarrefourBase
+from client.config import LIGNE_ARRET
+from support_simulation import EtatSimulation as EtatCarrefour
+from support_simulation import SimulateurClients as ClientsSimulation
+from client.vehicule import Vehicule
+from client.trajectoire import TrajectoireVehicule as VueCarrefourBase
 
 
 class FilesVehiculesTest(unittest.TestCase):
@@ -31,20 +31,20 @@ class FilesVehiculesTest(unittest.TestCase):
                             self.assertGreaterEqual(ecart, 6 - 1e-8)
                             self.assertLess(ecart, longueur)
 
-    def test_serveur_utilise_la_distance_pour_creer_et_avancer(self):
+    def test_clients_utilise_la_distance_pour_creer_et_avancer(self):
         etat = EtatCarrefour()
         etat.distances_affichage["T"] = {"S": 6}
-        serveur = ServeurCarrefour(etat)
-        premiere = serveur._creer_vehicule("Premiere", "voiture", "S", "DROITE", 0)
+        clients = ClientsSimulation(etat)
+        premiere = clients._creer_vehicule("Premiere", "voiture", "S", "DROITE", 0)
         self.assertIsNotNone(premiere)
-        self.assertIsNone(serveur._creer_vehicule("TropPres", "voiture", "S", "DROITE", -5))
-        suivante = serveur._creer_vehicule("Suivante", "voiture", "S", "DROITE", -6)
+        self.assertIsNone(clients._creer_vehicule("TropPres", "voiture", "S", "DROITE", -5))
+        suivante = clients._creer_vehicule("Suivante", "voiture", "S", "DROITE", -6)
         self.assertIsNotNone(suivante)
         client = Mock()
-        serveur._avancer_vehicule(client, suivante, -5)
+        clients._avancer_vehicule(client, suivante, -5)
         client.sendall.assert_called_with(b"ATTENTE\n")
-        serveur._avancer_vehicule(client, premiere, 1)
-        serveur._avancer_vehicule(client, suivante, -5)
+        clients._avancer_vehicule(client, premiere, 1)
+        clients._avancer_vehicule(client, suivante, -5)
         client.sendall.assert_called_with(b"OK\n")
         self.assertEqual(-5, suivante.progression)
 

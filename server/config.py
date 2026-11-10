@@ -1,25 +1,17 @@
 """Reglages du serveur carrefour."""
 
+import os
 from pathlib import Path
 
-BIND_HOST = "0.0.0.0"
-PORT = 5050
+BIND_HOST = os.environ.get("SAE302_BIND_HOST", "0.0.0.0")
+PORT = int(os.environ.get("SAE302_PORT", "5050"))
 
-LIGNE_ARRET = 30
-# La zone protegee tient compte de la taille des voitures a l'ecran.
-DEBUT_CENTRE = 35
-FIN_CENTRE = 70
-# Fin de la premiere partie du virage, avant de couper la voie opposee.
-POSITION_ATTENTE_GAUCHE = 40
-FIN_DEPASSEMENT_DROITE = 60
-PAS_RANGEMENT_URGENCE = 0.1
-PAS_PREPARATION_DEPASSEMENT = 0.1
+DB_SQLITE_PATH = Path(os.environ.get(
+    "SAE302_DB_PATH", Path(__file__).resolve().parent / "data" / "carrefour.sqlite3"
+)).expanduser()
 
-# Valeurs de repli sans interface et espacement dans la zone de croisement.
-DISTANCE_SECURITE_DEFAUT = 20
-DISTANCE_SORTIE = 20
-
-PAS_AVANCEMENT = 1
-PAS_SIMULATION = 0.08
-
-DB_SQLITE_PATH = Path(__file__).resolve().parent / "data" / "carrefour.sqlite3"
+# Repere de dessin fixe transmis aux clients ; la vue Qt le met a l'echelle.
+LARGEUR_SCENE = 1000
+HAUTEUR_SCENE = 600
+GEOMETRIE_SCENE = (50, 950, 500, 282, 564, 120)
+HAUT_BRANCHE_NORD = 36

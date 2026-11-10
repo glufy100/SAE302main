@@ -1,9 +1,9 @@
 """Verifie les trajectoires du carrefour en croix, partagees avec le T."""
 
 import unittest
-from server.config import LIGNE_ARRET
-from server.model.Vehicule import Vehicule
-from server.model.VueCarrefour import VueCarrefour
+from client.config import LIGNE_ARRET
+from client.vehicule import Vehicule
+from client.trajectoire import TrajectoireVehicule as VueCarrefour
 
 
 class PositionArretTest(unittest.TestCase):

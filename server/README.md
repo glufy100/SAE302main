@@ -1,81 +1,81 @@
 # Serveur carrefour
 
-Copier seulement ce dossier `server/` sur la machine du carrefour. Installer Python 3 et PySide6 :
+## Paquet Debian 13 — VM serveur
+
+La VM serveur doit disposer d'un bureau graphique. Dans un terminal de cette session :
 
 ```bash
-python3 -m pip install -r requirements.txt
+sudo apt update
+sudo apt install ./sae302-server_1.0.0_all.deb
+sae302-server
 ```
 
-Depuis ce dossier, lancer le serveur et son interface sur le reseau local :
+Lancer sans `sudo`. La configuration est dans `/etc/sae302/server.conf` :
+`SAE302_BIND_HOST=0.0.0.0`, `SAE302_PORT=5050`. Autoriser le port TCP depuis la
+VM client. L'interface doit rester ouverte pendant la simulation ; il n'y a pas
+de service systemd ni de mode sans interface graphique.
+
+Le paquet conserve SQLite dans `~/.local/share/sae302/carrefour.sqlite3`
+(ou sous `$XDG_DATA_HOME` si défini). `SAE302_DB_PATH` permet de choisir un autre
+chemin accessible en écriture. Voir le [guide deux VM Debian 13](../doc/Installation.md)
+pour la construction, l'installation et la validation des paquets.
+
+## Depuis les sources
+
+Copier seulement le dossier `server/` sur la machine du carrefour. Sous Debian 13, installer Python 3 et les bindings Qt système :
 
 ```bash
-./lancer_serveur.sh
+sudo apt install python3 python3-pyside6.qtwidgets
+python3 carrefour.py
 ```
 
-Sous Windows PowerShell, depuis le meme dossier :
+Pour utiliser la version PySide6 épinglée dans `requirements.txt`, créer un environnement virtuel comme indiqué dans le guide d’installation.
+
+Sous Windows PowerShell :
 
 ```powershell
 python carrefour.py
 ```
 
-Le serveur ecoute sur `0.0.0.0:5050`. Le pare-feu doit autoriser les connexions TCP entrantes sur ce port. Pour changer de port, modifier `PORT` dans `server/config.py` et `client/config.py`. Le serveur fournit aux clients la ligne d'arrêt, le pas d'avancement et le délai de simulation via `GET_LIGNE_ARRET`, `GET_PAS_AVANCEMENT` et `GET_PAS_SIMULATION`. Les passages termines sont enregistres dans `server/data/carrefour.sqlite3`.
+Le serveur ecoute sur `0.0.0.0:5050`. Définir `SAE302_PORT` des deux côtés pour changer le port, et `SAE302_BIND_HOST` pour changer l’adresse d’écoute. Les lanceurs Debian lisent ces valeurs dans `/etc/sae302/*.conf` ; les lancements directs utilisent les variables d’environnement ou les valeurs de repli des fichiers `config.py`.
 
-## Organisation de l'affichage
+## Repartition des roles
 
-`TrajectoireVehicule` partage les positions et les contours entre le dessin et le serveur.
-`VueCarrefourBase` contient le dessin commun des vehicules et des feux.
-`VueCarrefourT` et `VueCarrefour` dessinent uniquement leur decor, leurs routes et leurs marquages,
-avec les memes proportions. `PanneauCarrefour` partage les compteurs des deux onglets.
-Le cycle des feux est gere dans `EtatCarrefour` et declenche par le minuteur de la fenetre.
+Le serveur gere les feux, les demandes de priorite, les connexions, l'affichage et les statistiques.
+Il ne calcule aucune avance, trajectoire, distance de securite, collision ou manoeuvre de voiture.
+Ces calculs se trouvent dans les modules `client/conduite.py`, `client/trajectoire.py` et
+`client/geometrie.py`. Les reglages de conduite sont dans `client/config.py`.
 
-Les files utilisent une distance calculee depuis la taille des voitures et la longueur de
-chaque approche : au moins 6 pixels entre les contours, arrondis au prochain pas de simulation.
-Le serveur utilise les dimensions de la vue associee a chaque carrefour. Les voitures demandent
-une place libre point par point a leur arrivee, plutot que de reculer par blocs de 20 points.
+Chaque client envoie sa progression, ses indicateurs de conduite et sa pose graphique complete
+`[x, y, angle, longueur, largeur]`. `VueCarrefourBase` dessine directement cette pose.
+Le repere de route est fixe (1000 x 600) et la vue Qt met toute la scene a l'echelle lors
+du redimensionnement : aucune trajectoire n'est recalculee par l'interface.
 
-Les deux onglets ont des trafics, des feux, des urgences et des compteurs independants.
-Les vehicules selectionnent le T avec `CARREFOUR|T` avant leur identite ; sans selection,
-ils rejoignent le carrefour en croix. Les deux simulations utilisent le meme port TCP.
-`GET_TRAJETS` fournit les entrees et les manoeuvres autorisees par le carrefour selectionne.
-Le T autorise seulement S vers E/O, E vers O/S et O vers E/S. Le serveur rejette un
-trajet impossible des l'inscription, au lieu de masquer une voiture pendant sa traversee.
+Les onglets en croix et en T ont chacun leur etat, leurs feux et leurs compteurs.
+Le T autorise uniquement S vers E/O, E vers O/S et O vers E/S.
 
-Le suivi reste actif apres la ligne d'arret. Chaque deplacement est refuse si le contour
-oriente de la voiture, augmente de la marge de securite, touche une autre voiture.
-Les trajets conflictuels sont reserves avant le depart de la ligne pour eviter un blocage
-au milieu du croisement. Les trajets paralleles sans conflit peuvent avancer ensemble.
+## Protocole TCP
 
-## Attente pendant le virage a gauche
+Les messages sont des lignes `COMMANDE|contenu`. Les rapports et instantanes utilisent JSON.
 
-La voiture suit la courbe de virage d'origine, avec les memes points de controle,
-positions de voie et dimensions qu'avant l'ajout du rangement. Au vert, elle s'engage
-sur cette courbe et peut attendre a `POSITION_ATTENTE_GAUCHE` (40), avant de couper
-la circulation opposee. Elle reprend exactement la meme courbe quand la voie se libere.
-Il n'y a pas de poche de rangement ni de changement de trajectoire pour le tourne-a-gauche.
+| Commande | Role |
+|---|---|
+| `CARREFOUR|T` | Selectionne le T avant l'inscription ; la croix est selectionnee par defaut |
+| `GET_TRAJETS` | Transmet les branches et manoeuvres permises par l'infrastructure |
+| `INSTANTANE` | Renvoie feux, priorite, scene, rapports des voitures et revision du trafic |
+| `IDENTITE|{revision, vehicule}` | Enregistre l'identite et la place de depart calculee par le client |
+| `POSITION|{revision, vehicule}` | Enregistre l'etat complet calcule par le client |
+| `URGENCE` | Modifie les feux pour un vehicule prioritaire |
+| `TERMINE` | Enregistre un passage termine dans SQLite et confirme par `OK` |
 
-Une voiture qui va tout droit prepare un depassement temporaire par la droite uniquement
-si la voiture juste devant est deja engagee dans son virage a gauche (progression 40),
-que le feu est vert et que la suivante est proche de la ligne. La preparation laterale
-s'effectue par petits pas, a progression longitudinale fixe, pour eviter tout saut de position.
-Un virage a droite ou un tout-droit intercale empeche ce declenchement, meme si un
-tourne-a-gauche se trouve plus loin dans la file.
-La voiture qui double retrouve sa trajectoire habituelle a `FIN_DEPASSEMENT_DROITE` (60). Le decalage a droite est termine avant la ligne, pour garder libre la fin du virage
-meme si le feu change. Le feu rouge, les distances et les contours restent controles. Deux virages
-a gauche en sens opposes sont reserves successivement pour eviter un blocage face a face.
+Le serveur controle le format du rapport et sa revision, pas les calculs de conduite.
+Si le trafic a change depuis l'instantane utilise, il repond `REESSAYER` ; le client relit
+le trafic et recalcule. Deux propositions fondees sur le meme ancien etat ne peuvent donc
+pas modifier le trafic simultanement. Un simple compteur d'attente ne change pas la revision.
 
-## Laisser passer une ambulance
+Le client indique aussi s'il occupe encore le croisement. Le cycle des feux attend cet
+indicateur avant d'ouvrir un axe oppose. Les passages sont conserves dans
+`server/data/carrefour.sqlite3` depuis les sources, ou dans le dossier personnel avec le paquet ; les temps d'attente sont declares par les clients.
 
-Les voitures non engagees devant une ambulance de la meme branche se rangent progressivement
-a droite dans le refuge lateral. L'ambulance reste sur sa voie et depasse la file rangee.
-Une voiture deja engagee termine sa traversee au lieu de se decaler au milieu du carrefour.
-
-`decalage_urgence` varie de 0 (sur la voie) a 1 (sur le cote), par pas de
-`PAS_RANGEMENT_URGENCE`. La progression longitudinale reste fixe pendant le rangement.
-Apres le passage de l'ambulance, le serveur attend que toute la zone de reinsertion soit
-libre avant de faire revenir la voiture, puis autorise sa reprise de route. Les mouvements
-lateraux utilisent les memes controles de collision que les deplacements habituels.
-
-Lorsqu'une urgence change les feux, la priorite a droite s'applique aux nouvelles entrees.
-Une voiture deja engagee peut terminer son virage : elle ne doit pas attendre une ambulance
-qui attend elle-meme que le carrefour se libere. L'espace protege devant une voiture
-engagee couvre la fin de son trajet, y compris pendant une attente au milieu du virage.
+Ce protocole remplace l'ancien `POSITION|nombre` : relancer le serveur et les clients ensemble
+apres la mise a jour.

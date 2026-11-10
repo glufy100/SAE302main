@@ -12,9 +12,10 @@ class VueCarrefourT(VueCarrefourBase):
         """Dessine la scene a chaque rafraichissement."""
         peintre = QPainter(self)
         peintre.setRenderHint(QPainter.RenderHint.Antialiasing)
-        largeur = self.width()
+        peintre.scale(self.width() / 1000, self.height() / 600)
+        largeur = 1000
 
-        peintre.fillRect(self.rect(), self.COULEUR_FOND)
+        peintre.fillRect(QRectF(0, 0, 1000, 600), self.COULEUR_FOND)
 
         gauche, droite, centre_x, centre_y, bas_stem, epaisseur = geometrie = self._geometrie()
         haut_route = centre_y - epaisseur / 2

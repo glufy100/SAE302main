@@ -1,16 +1,13 @@
 """Dessin partage par les carrefours en T et en croix."""
 
 from dataclasses import replace
-from math import ceil
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from server.config import LIGNE_ARRET
+from server.config import GEOMETRIE_SCENE
 from server.model.EtatCarrefour import EtatCarrefour
-from server.model.Vehicule import Vehicule
-from server.model.TrajectoireVehicule import TrajectoireVehicule
 
 
 class VueCarrefourBase(QWidget):
@@ -29,9 +26,7 @@ class VueCarrefourBase(QWidget):
     VERT_ETEINT = QColor("#1f3a2e")
 
     RAYON = 12
-    ECART_FILE = TrajectoireVehicule.ECART_FILE
-    ECART_LIGNE = TrajectoireVehicule.ECART_LIGNE
-    CONTOUR_VEHICULE = TrajectoireVehicule.CONTOUR_VEHICULE
+    CONTOUR_VEHICULE = 1
 
     def __init__(self, etat: EtatCarrefour):
         if not isinstance(etat, EtatCarrefour):
@@ -41,38 +36,12 @@ class VueCarrefourBase(QWidget):
         self.setMinimumSize(700, 500)
 
     def _geometrie(self):
-        """Dimensions communes, proportionnelles a la taille de la vue."""
-        largeur, hauteur = self.width(), self.height()
-        epaisseur = min(largeur, hauteur) * 0.2
-        return (largeur * 0.05, largeur * 0.95, largeur / 2,
-                hauteur * 0.47, hauteur * 0.94, epaisseur)
+        """Repere commun aux routes et aux positions graphiques recues des clients."""
+        return GEOMETRIE_SCENE
 
     def _etat_affichage(self, geometrie, haut_stem=None):
-        """Copie l'etat et ajuste les distances a la taille reelle des voitures."""
-        distances = self._distances_securite(geometrie, haut_stem)
         with self.etat.verrou:
-            self.etat.distances_affichage[type(self).__name__] = distances
-            self.etat.geometries_affichage[type(self).__name__] = (geometrie, haut_stem)
-            feux = dict(self.etat.feux)
-            vehicules = [replace(v) for v in self.etat.vehicules.values()]
-        return feux, vehicules
-
-    @staticmethod
-    def _distances_securite(geometrie, haut_stem=None):
-        """Convertit la longueur des voitures en points de progression."""
-        distances = {}
-        for direction in (("N", "S", "E", "O") if haut_stem is not None else ("S", "E", "O")):
-            # Le trajet avant le feu est rectiligne et independant du virage.
-            manoeuvre = "DROITE" if direction == "S" and haut_stem is None else "TOUT_DROIT"
-            voiture = Vehicule("geometrie", "voiture", direction, "", manoeuvre=manoeuvre)
-            depart = VueCarrefourBase._position_vehicule(voiture, *geometrie, haut_stem)
-            voiture.progression = LIGNE_ARRET
-            arret = VueCarrefourBase._position_vehicule(voiture, *geometrie, haut_stem)
-            distance_approche = (arret[0] - depart[0]).manhattanLength()
-            longueur = arret[2]
-            # 6 px libres entre les contours des deux voitures.
-            distances[direction] = ceil((longueur + VueCarrefourBase.CONTOUR_VEHICULE + VueCarrefourBase.ECART_FILE) * LIGNE_ARRET / distance_approche)
-        return distances
+            return dict(self.etat.feux), [replace(v) for v in self.etat.vehicules.values()]
 
     def _dessiner_feu(self, peintre: QPainter, lettre: str, x_centre: float, y_haut: float, vert: bool) -> None:
         """Dessine un feu : rond rouge en haut, rond vert en bas, un seul allume."""
@@ -102,8 +71,6 @@ class VueCarrefourBase(QWidget):
             QRectF(x_centre - 20, y_haut - 22, 40, 20), Qt.AlignmentFlag.AlignCenter, lettre
         )
 
-    _position_vehicule = staticmethod(TrajectoireVehicule._position_vehicule)
-
     def _dessiner_refuges_urgence(self, peintre, geometrie, haut_stem=None):
         """Bandes laterales ou se rangent les voitures devant une ambulance."""
         gauche, droite, cx, cy, bas, epaisseur = geometrie
@@ -126,16 +93,13 @@ class VueCarrefourBase(QWidget):
 
     def _dessiner_vehicules(self, peintre, vehicules, gauche, droite, centre_x,
                             centre_y, bas_stem, epaisseur, haut_stem=None):
-        """Affiche les positions validees par le serveur, y compris les urgences."""
+        """Dessine telles quelles les positions et orientations calculees par les clients."""
         for vehicule in vehicules:
-            geometrie = self._position_vehicule(
-                vehicule, gauche, droite, centre_x, centre_y, bas_stem, epaisseur, haut_stem
-            )
-            if geometrie is None:
+            if vehicule.position_affichage is None:
                 continue
-            position, angle, longueur, largeur = geometrie
+            x, y, angle, longueur, largeur = vehicule.position_affichage
             peintre.save()
-            peintre.translate(position)
+            peintre.translate(x, y)
             peintre.rotate(angle)
             peintre.setPen(QPen(self.COULEUR_CONTOUR, self.CONTOUR_VEHICULE))
             peintre.setBrush(QColor("#e9584f" if vehicule.prioritaire else "#3478bd"))

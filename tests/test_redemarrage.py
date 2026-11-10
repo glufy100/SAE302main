@@ -3,12 +3,12 @@
 import unittest
 from unittest.mock import Mock
 
-from server.config import LIGNE_ARRET
-from server.model.EtatCarrefour import EtatCarrefour
-from server.model.ServeurCarrefour import ServeurCarrefour
-from server.model.TrajectoireVehicule import TrajectoireVehicule
-from server.model.Vehicule import Vehicule
-from server.model.VueCarrefourBase import VueCarrefourBase
+from client.config import LIGNE_ARRET
+from support_simulation import EtatSimulation as EtatCarrefour
+from support_simulation import SimulateurClients as ClientsSimulation
+from client.trajectoire import TrajectoireVehicule
+from client.vehicule import Vehicule
+from client.trajectoire import TrajectoireVehicule as VueCarrefourBase
 
 
 class RedemarrageTest(unittest.TestCase):
@@ -20,9 +20,9 @@ class RedemarrageTest(unittest.TestCase):
         suivante = Vehicule('Suivante', 'voiture', 'S', '2',
                             progression=39, engagee=True, manoeuvre='GAUCHE')
         etat.vehicules = {v.nom: v for v in (premiere, suivante)}
-        serveur = ServeurCarrefour(etat)
+        clients = ClientsSimulation(etat)
         client = Mock()
-        serveur._avancer_vehicule(client, suivante, 40)
+        clients._avancer_vehicule(client, suivante, 40)
         self.assertEqual(39, suivante.progression)
         client.sendall.assert_called_with(b'ATTENTE\n')
 
@@ -44,10 +44,10 @@ class RedemarrageTest(unittest.TestCase):
                                              progression=LIGNE_ARRET - i * distances[direction])
                                     for i, manoeuvre in enumerate(manoeuvres)]
                         etat.vehicules = {v.nom: v for v in voitures}
-                        serveur = ServeurCarrefour(etat)
+                        clients = ClientsSimulation(etat)
                         client = Mock()
                         etat.feux[direction] = 'ROUGE'
-                        serveur._avancer_vehicule(client, voitures[0], LIGNE_ARRET + 1)
+                        clients._avancer_vehicule(client, voitures[0], LIGNE_ARRET + 1)
                         self.assertEqual(LIGNE_ARRET, voitures[0].progression)
                         etat.feux[direction] = 'VERT'
                         # Les suiveuses demandent leur pas avant la voiture de tete,
@@ -55,7 +55,7 @@ class RedemarrageTest(unittest.TestCase):
                         for _ in range(600):
                             for voiture in reversed(voitures):
                                 if voiture.progression < 100:
-                                    serveur._avancer_vehicule(client, voiture, voiture.progression + 1)
+                                    clients._avancer_vehicule(client, voiture, voiture.progression + 1)
                             contours = [TrajectoireVehicule.contour(v, geometrie, haut)
                                         for v in voitures if v.progression < 100]
                             for index, contour in enumerate(contours):
@@ -78,12 +78,12 @@ class RedemarrageTest(unittest.TestCase):
                                       manoeuvre=manoeuvre, progression=LIGNE_ARRET)
                             for i, (direction, manoeuvre) in enumerate(zip(('N', 'S'), manoeuvres))]
                 etat.vehicules = {v.nom: v for v in voitures}
-                serveur = ServeurCarrefour(etat)
+                clients = ClientsSimulation(etat)
                 client = Mock()
                 for _ in range(300):
                     for voiture in voitures:
                         if voiture.progression < 100:
-                            serveur._avancer_vehicule(client, voiture, voiture.progression + 1)
+                            clients._avancer_vehicule(client, voiture, voiture.progression + 1)
                     if all(v.progression < 100 for v in voitures):
                         contours = [TrajectoireVehicule.contour(v, geometrie, 36) for v in voitures]
                         self.assertFalse(contours[0].intersects(contours[1]))
@@ -104,23 +104,23 @@ class RedemarrageTest(unittest.TestCase):
                 suivante = Vehicule('Suivante', 'voiture', direction, '2', progression=29)
                 etat.vehicules = {v.nom: v for v in (tete, suivante)}
                 etat.feux[direction] = 'ROUGE'
-                serveur = ServeurCarrefour(etat)
+                clients = ClientsSimulation(etat)
                 client = Mock()
                 # Les deux voitures sont encore separees avant la demande.
                 self.assertFalse(TrajectoireVehicule.mouvement_occupe(
                     suivante, 29, (tete,), ((geometrie, 34.8),)))
-                serveur._avancer_vehicule(client, suivante, 30)
+                clients._avancer_vehicule(client, suivante, 30)
                 self.assertEqual(29, suivante.progression)
                 client.sendall.assert_called_with(b'ATTENTE\n')
                 # La tete peut finir de degager la zone meme si le feu est rouge.
                 for _ in range(100):
                     if tete.progression == 100:
                         break
-                    serveur._avancer_vehicule(client, tete, tete.progression + 1)
+                    clients._avancer_vehicule(client, tete, tete.progression + 1)
                 self.assertEqual(100, tete.progression)
-                serveur._avancer_vehicule(client, suivante, 30)
+                clients._avancer_vehicule(client, suivante, 30)
                 self.assertEqual(30, suivante.progression)
-                serveur._avancer_vehicule(client, suivante, 31)
+                clients._avancer_vehicule(client, suivante, 31)
                 self.assertEqual(30, suivante.progression)
 
     def test_urgence_au_sud_laisse_sortir_la_voiture_deja_engagee_a_est(self):
@@ -139,13 +139,13 @@ class RedemarrageTest(unittest.TestCase):
         ]
         etat.vehicules = {v.nom: v for v in voitures}
         etat.changer_feux('S')
-        serveur = ServeurCarrefour(etat)
+        clients = ClientsSimulation(etat)
         client = Mock()
         terminees = set()
         for _ in range(400):
             for voiture in list(etat.vehicules.values()):
                 demande = prochaine_position(voiture.progression, etat.feux[voiture.direction])
-                serveur._avancer_vehicule(client, voiture, demande)
+                clients._avancer_vehicule(client, voiture, demande)
                 if voiture.progression == 100:
                     terminees.add(voiture.nom)
                     del etat.vehicules[voiture.nom]

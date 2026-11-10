@@ -12,9 +12,10 @@ class VueCarrefour(VueCarrefourBase):
         """Dessine les routes, les feux et les voitures de l'etat partage."""
         peintre = QPainter(self)
         peintre.setRenderHint(QPainter.RenderHint.Antialiasing)
-        peintre.fillRect(self.rect(), self.COULEUR_FOND)
+        peintre.scale(self.width() / 1000, self.height() / 600)
+        peintre.fillRect(QRectF(0, 0, 1000, 600), self.COULEUR_FOND)
         gauche, droite, centre_x, centre_y, bas, epaisseur = geometrie = self._geometrie()
-        haut = self.height() * 0.06
+        haut = 36
         demi = epaisseur / 2
         feux, vehicules = self._etat_affichage(geometrie, haut)
 

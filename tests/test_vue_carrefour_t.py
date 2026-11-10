@@ -2,9 +2,9 @@
 
 import unittest
 
-from server.config import LIGNE_ARRET
-from server.model.Vehicule import Vehicule
-from server.model.VueCarrefourT import VueCarrefourT
+from client.config import LIGNE_ARRET
+from client.vehicule import Vehicule
+from client.trajectoire import TrajectoireVehicule as VueCarrefourT
 
 
 class TrajectoiresCarrefourTTest(unittest.TestCase):

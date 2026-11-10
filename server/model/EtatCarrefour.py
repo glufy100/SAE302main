@@ -1,7 +1,8 @@
+from dataclasses import asdict
 import threading
 from PySide6.QtCore import QObject, Signal
 
-from server.config import DISTANCE_SECURITE_DEFAUT, FIN_CENTRE
+from server.config import GEOMETRIE_SCENE, HAUT_BRANCHE_NORD
 from server.model.BaseDonnees import BaseDonnees
 from server.model.Vehicule import Vehicule
 
@@ -27,11 +28,10 @@ class EtatCarrefour(QObject):
                          "E": ("TOUT_DROIT", "GAUCHE"),
                          "O": ("TOUT_DROIT", "DROITE")})
         self.base_donnees = base_donnees
-        self.verrou = threading.Lock()
+        self.verrou = threading.RLock()
         self.feux = {direction: "VERT" if direction in ("N", "S") and direction in self.trajets else "ROUGE"
                      for direction in ("N", "S", "E", "O")}
-        self.geometries_affichage: dict[str, tuple] = {}
-        self.distances_affichage: dict[str, dict[str, int]] = {}
+        self.revision = 0
         self.vehicules: dict[str, Vehicule] = {}
         self.priorite: str | None = None
         self.phase = "NS_VERT"
@@ -41,14 +41,13 @@ class EtatCarrefour(QObject):
         self.temps_attente_total = 0.0
         self.prochain_identifiant_affichage = 1
 
-    def distance_securite(self, direction: str) -> int:
-        """Ecart en progression garantissant au moins 6 px entre les voitures.
-
-        A appeler sous verrou. Les dimensions proviennent de la vue associee
-        a cet etat et sont actualisees avec la taille de la fenetre.
-        """
-        return max((distances[direction] for distances in self.distances_affichage.values()
-                    if direction in distances), default=DISTANCE_SECURITE_DEFAUT)
+    def instantane(self):
+        """Transmet les donnees sans decider du mouvement des vehicules."""
+        with self.verrou:
+            return {"revision": self.revision, "feux": dict(self.feux),
+                    "priorite": self.priorite, "trajets": self.trajets,
+                    "scene": (GEOMETRIE_SCENE, HAUT_BRANCHE_NORD if self.type_carrefour == "CROIX" else None),
+                    "vehicules": [asdict(v) for v in self.vehicules.values()]}
 
     def notifier(self) -> None:
         """Previent l'interface que l'etat a change."""
@@ -73,6 +72,7 @@ class EtatCarrefour(QObject):
                 self.priorite = None
                 self.phase = "NS_VERT"
                 self.temps_phase = 0
+            self.revision += 1
 
     def avancer_cycle(self):
         """Fait tourner les feux, une fois le croisement libere."""
@@ -90,20 +90,15 @@ class EtatCarrefour(QObject):
             if self.temps_phase < duree:
                 return
             if self.phase.endswith("ORANGE") and any(
-                v.engagee and v.progression <= FIN_CENTRE for v in self.vehicules.values()
+                v.dans_carrefour for v in self.vehicules.values()
             ):
                 return
             self.phase = phase_suivante
             self.temps_phase = 0
             self.feux = {direction: couleur if direction in directions and direction in self.trajets else "ROUGE"
                          for direction in ("N", "S", "E", "O")}
+            self.revision += 1
         self.notifier()
-
-    def enregistrer_attente(self, vehicule: Vehicule, duree: float) -> None:
-        """Ajoute du temps d'attente au vehicule et au total."""
-        with self.verrou:
-            vehicule.temps_attente += duree
-            self.temps_attente_total += duree
 
     def enregistrer_passage(self, vehicule: Vehicule) -> None:
         """Enregistre un vehicule qui a traverse."""
@@ -111,7 +106,6 @@ class EtatCarrefour(QObject):
             self.base_donnees.enregistrer_passage(vehicule)
 
         with self.verrou:
-            vehicule.progression = 100
             self.passages_termines += 1
             if vehicule.prioritaire:
                 self.urgences_traitees += 1

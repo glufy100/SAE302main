@@ -1,301 +1,303 @@
-# Documentation d'installation
+# Installation sur deux VM Debian 13
 
-Cette documentation explique comment installer le carrefour et les vehicules sur deux machines distinctes.
+Le déploiement utilise **deux VM séparées** : une VM serveur avec bureau graphique
+pour le carrefour et une VM client pour les véhicules. Le client n'a besoin que
+d'un terminal. Les deux VM utilisent Debian 13 (Trixie) et Python 3.13.
 
-## 1. Prerequis
+## 1. Préparer le réseau
 
-Avant de commencer, il faut avoir :
+Connecter les VM au même réseau virtuel (réseau privé hôte, réseau interne avec
+une seconde carte NAT pour Internet, réseau NAT partagé ou mode pont). Deux cartes
+NAT isolées ne permettent généralement pas aux VM de communiquer directement.
+APT doit avoir accès aux dépôts Debian pour installer les dépendances.
 
-- Python 3 installe ;
-- Git installe ;
-- un terminal ;
-- une connexion Internet sur la machine du carrefour pour installer PySide6.
+Exemple à adapter à votre réseau ; ces adresses doivent être attribuées aux VM :
 
-Version recommandee :
+| Machine | Adresse d'exemple | Rôle |
+|---|---|---|
+| VM serveur | `192.168.56.10` | Interface PySide6, feux, TCP, SQLite |
+| VM client | `192.168.56.11` | Calcul et génération des véhicules |
 
-```bash
-python3 --version
-```
+Sur chaque VM, relever l'adresse avec `ip -br address`. Sur la VM serveur,
+installer un environnement de bureau lors de l'installation de Debian, puis
+ouvrir une session graphique. Le serveur s'exécute dans cette session, sous un
+utilisateur normal. Il ne dispose pas de mode serveur sans interface.
 
-Le cahier des charges indique Python 3.13. Le client utilise seulement la bibliotheque standard de Python ; le serveur a besoin d'une version compatible avec PySide6.
+Le seul port applicatif est **TCP 5050**, entrant sur la VM serveur. Si un
+pare-feu est actif, autoriser ce port depuis la VM client selon son outil de
+configuration. Aucun port entrant n'est nécessaire sur le client. Le protocole
+n'a ni authentification ni chiffrement : utiliser le réseau de TP, sans exposer
+le port sur Internet.
 
-## 2. Recuperer le projet
+## 2. Obtenir les deux paquets `.deb`
 
-Cloner le depot Git :
-
-```bash
-git clone <URL_DU_REPOSITORY>
-cd SAE302
-```
-
-Pour deux VM, copier uniquement le dossier `server/` sur la machine du carrefour et le dossier `client/` sur la machine des vehicules. Aucun fichier Python n'est partage entre les deux dossiers.
-
-Si le projet est deja sur la machine, aller simplement dans le dossier :
-
-```bash
-cd /chemin/vers/SAE302
-```
-
-## 3. Creer l'environnement virtuel
-
-### macOS / Linux
+Depuis la racine du dépôt, sur la machine qui possède les sources :
 
 ```bash
-python3 -m venv .venv
+python3 packaging/build_deb.py
 ```
 
-### Windows
+Cette commande fonctionne sous Linux ou macOS avec Python standard, sans root,
+`pip` ni outil de compilation. Elle produit :
+
+```text
+dist/sae302-server_1.0.0_all.deb
+dist/sae302-client_1.0.0_all.deb
+dist/SHA256SUMS
+```
+
+Les paquets contiennent du Python et sont indépendants de l'architecture (`all`,
+notamment amd64 et arm64). Leurs dépendances sont installées par APT sur Debian 13.
+Ils n'embarquent ni environnement virtuel, ni historique SQLite, ni PySide6.
+
+Copier le paquet serveur sur la VM serveur et le paquet client sur la VM client
+(dossier partagé, clé USB ou `scp` si SSH est déjà installé). Exemple depuis la
+machine de construction, avec vos noms d'utilisateurs et adresses :
 
 ```bash
-python -m venv .venv
+scp dist/sae302-server_1.0.0_all.deb utilisateur@192.168.56.10:~/
+scp dist/sae302-client_1.0.0_all.deb utilisateur@192.168.56.11:~/
 ```
 
-L'environnement virtuel concerne seulement le serveur. Le client n'a pas de dependance a installer.
+## 3. Installer et lancer la VM serveur
 
-## 4. Activer l'environnement virtuel
-
-### macOS / Linux
+Dans un terminal de la **session graphique de la VM serveur** :
 
 ```bash
-source .venv/bin/activate
+cd ~
+sudo apt update
+sudo apt install ./sae302-server_1.0.0_all.deb
+sudo nano /etc/sae302/server.conf
 ```
 
-### Windows PowerShell
+Configuration par défaut :
 
-```powershell
-.venv\Scripts\Activate.ps1
+```ini
+SAE302_BIND_HOST=0.0.0.0
+SAE302_PORT=5050
 ```
 
-### Windows CMD
+`0.0.0.0` signifie écouter sur les interfaces réseau de la VM. Ce n'est pas
+l'adresse à renseigner sur le client. Pour limiter l'écoute à la carte du TP,
+remplacer cette valeur par l'adresse de cette carte.
 
-```bat
-.venv\Scripts\activate.bat
-```
-
-Quand l'environnement est active, le terminal affiche souvent `(.venv)` au debut de la ligne.
-
-## 5. Installer les dependances
-
-Depuis la racine du projet, sur la machine du carrefour :
+Lancer **sans sudo** :
 
 ```bash
-pip install -r server/requirements.txt
+sae302-server
 ```
 
-## 6. Verifier l'installation
+Le menu des applications propose aussi « Carrefour intelligent - Serveur ».
+Garder la fenêtre ouverte : elle porte le serveur TCP et les deux onglets croix/T.
+Ne pas lancer une deuxième instance sur le même port.
 
-Lancer les tests :
+Dans un autre terminal du serveur, vérifier l'écoute :
 
 ```bash
-python -m unittest discover -s tests
+ss -ltn 'sport = :5050'
 ```
 
-Sur macOS ou Linux, si `python` n'existe pas, utiliser :
+## 4. Installer et configurer la VM client
+
+Sur la **VM client** :
 
 ```bash
-python3 -m unittest discover -s tests
+cd ~
+sudo apt update
+sudo apt install ./sae302-client_1.0.0_all.deb
+sudo nano /etc/sae302/client.conf
 ```
 
-La commande lance la suite disponible dans le dossier `tests/`.
+Renseigner l'adresse réelle de la VM serveur :
 
-## 7. Lancer la simulation
+```ini
+SAE302_HOST=192.168.56.10
+SAE302_PORT=5050
+```
 
-### Methode simple
+`127.0.0.1` désignerait la VM client elle-même et ne convient pas à ce déploiement.
+Le port doit être identique sur les deux VM. Les fichiers `.conf` sont lus par
+les lanceurs au démarrage ; après modification, relancer les programmes concernés.
+Leur syntaxe est celle du shell : `NOM=valeur`, sans espace autour de `=`.
 
-Depuis la racine du projet, le script `lancer_simulation.sh` demarre le serveur et son interface, puis lance les clients apres trois secondes :
+Tester le réseau et une réponse du protocole, depuis la VM client, en adaptant
+l'adresse et le port à votre configuration :
 
 ```bash
-./lancer_simulation.sh 3 0.4
+python3 - <<'PY'
+import socket
+with socket.create_connection(("192.168.56.10", 5050), timeout=5) as connexion:
+    connexion.sendall(b"GET_TRAJETS\n")
+    with connexion.makefile("r", encoding="utf-8") as lecteur:
+        print(lecteur.readline().strip())
+PY
 ```
 
-Le premier argument est la densite des voitures (entier positif, ici `3`). Le second est la densite des urgences (valeur de `0` a `1`, ici `0.4`). Les deux valeurs sont facultatives et valent respectivement `3` et `0.4` par defaut.
+Une réponse `TRAJETS|...` confirme que le serveur applicatif est accessible.
 
-Si le serveur est deja lance sur cette machine, passer `--clients-only` en premier argument pour ne lancer que les clients :
+## 5. Lancer les véhicules
+
+Sur la VM client, après le démarrage du serveur :
 
 ```bash
-./lancer_simulation.sh --clients-only 3 0.4
+sae302-client 3 0.4
 ```
 
-Pour lancer seulement les clients sur une autre machine, copier le dossier `client/`, configurer `HOST` dans `client/config.py` avec l'adresse IP du serveur, puis lancer depuis la racine du dossier copie :
+Cette commande génère des voitures sur **les deux carrefours**, puis démarre les
+générateurs d'ambulances après 8 secondes. Les arguments sont :
 
-```bash
-./client/lancer_simulation.sh 3 0.4
-```
+| Argument | Valeur par défaut | Sens |
+|---|---|---|
+| 1 | `3` | Densité des voitures, entier supérieur ou égal à 1 |
+| 2 | `0.4` | Densité des urgences, de 0 à 1 ; 0 les désactive |
+| 3 | `TOUS` | `TOUS`, `CROIX` ou `T` |
 
-### Methode manuelle
-
-Terminal 1 : lancer le serveur et l'interface graphique.
-
-```bash
-python -m server.carrefour
-```
-
-Terminal 2 : lancer les voitures normales.
-
-```bash
-python -m client.voiture 3
-```
-
-Terminal 3 : lancer une ambulance.
-
-```bash
-python -m client.urgence Ambulance N
-```
-
-Sur macOS ou Linux, si `python` n'existe pas, remplacer par `python3`.
-
-### Deux machines / deux VM
-
-Les deux machines doivent etre sur le meme reseau local. Copier seulement `server/` sur la machine du carrefour et seulement `client/` sur celle des vehicules. Les clients ont besoin uniquement de Python 3.
-
-Sur la machine du carrefour, lancer le serveur avec son interface :
-
-```bash
-cd server
-python3 -m pip install -r requirements.txt
-./lancer_serveur.sh
-```
-
-Trouver l'adresse IP locale de cette machine. Sur la machine des vehicules, remplacer `HOST = "127.0.0.1"` dans `client/config.py` par cette adresse. Puis lancer ces deux commandes dans deux terminaux distincts :
-
-```bash
-cd client
-python3 voiture.py 3
-python3 urgence.py Ambulance N
-```
-
-Pour lancer automatiquement les voitures et une urgence sur cette deuxieme machine :
-
-```bash
-./lancer_simulation.sh 3 0.4
-```
-
-Le serveur ecoute sur `0.0.0.0:5050`. Le pare-feu de la machine du carrefour doit autoriser les connexions TCP entrantes sur ce port. Pour changer de port, modifier `PORT` dans `server/config.py` et `client/config.py`. La ligne d'arret, le pas d'avancement et le delai de simulation sont configures sur le serveur et communiques aux clients par TCP ; ils ne sont pas a dupliquer dans la configuration client.
-
-Sur Windows PowerShell, les memes commandes s'ecrivent par exemple :
-
-```powershell
-python carrefour.py
-```
-
-Sur la deuxieme VM Windows, dans un autre terminal PowerShell :
-
-```powershell
-python voiture.py 3
-```
-
-## 8. Directions disponibles
-
-Pour le vehicule prioritaire, les directions possibles sont :
-
-| Direction | Signification |
-|---|---|
-| `N` | Nord |
-| `S` | Sud |
-| `E` | Est |
-| `O` | Ouest |
+À `0.4`, l'attente aléatoire avant chaque ambulance est de 7,5 à 22,5 secondes
+(moyenne 15 secondes). L'intervalle entre deux arrivées inclut aussi la durée du
+passage précédent, car un générateur attend la fin de son ambulance.
 
 Exemples :
 
 ```bash
-cd client
-python urgence.py Ambulance N
-python urgence.py Police E
-python urgence.py Pompier S
+sae302-client 3 0.4 T
+sae302-client 3 0 CROIX
 ```
 
-## 9. Base de donnees SQLite
-
-Le serveur cree automatiquement `server/data/carrefour.sqlite3`. Cette base locale enregistre chaque passage termine avec le type de vehicule, la direction et son temps d'attente. Les compteurs de l'interface restent en memoire pendant la simulation.
-
-## 10. Problemes frequents
-
-### `python: command not found`
-
-Sur macOS ou Linux, utiliser :
+On peut aussi utiliser des terminaux distincts :
 
 ```bash
-python3
+sae302-voiture 3 --carrefour T
+sae302-urgence Ambulance S DROITE --carrefour T
 ```
 
-Exemple :
+Sans `--carrefour`, les commandes individuelles ciblent la croix. La croix dispose
+des branches `N`, `S`, `E`, `O`. Le T dispose seulement de `S`, `E`, `O` ; les
+manœuvres autorisées sont demandées au serveur avec `GET_TRAJETS`.
 
-```bash
-python3 -m server.carrefour
-```
+Contrôler dans l'interface serveur que les véhicules se déplacent, que les
+urgences obtiennent la priorité et que les compteurs augmentent après leur sortie.
+Pour arrêter : `Ctrl+C` sur le client, puis fermer la fenêtre du serveur.
 
-### `No module named PySide6`
+## 6. Fichiers installés et données
 
-L'environnement virtuel n'est pas active ou les dependances ne sont pas installees.
-
-Corriger avec :
-
-```bash
-source .venv/bin/activate
-pip install -r server/requirements.txt
-```
-
-Sur Windows :
-
-```powershell
-.venv\Scripts\Activate.ps1
-pip install -r server/requirements.txt
-```
-
-### Erreur Qt `Could not find the Qt platform plugin "cocoa"`
-
-Cette erreur peut arriver sur macOS si PySide6 est mal installe dans l'environnement virtuel.
-
-Solutions possibles :
-
-```bash
-pip uninstall PySide6 PySide6_Addons PySide6_Essentials shiboken6
-pip install -r server/requirements.txt
-```
-
-Si le probleme continue, lancer avec le Python qui fonctionne sur la machine :
-
-```bash
-python3 -m server.carrefour
-```
-
-### Le port `5050` est deja utilise
-
-Cela signifie qu'un serveur carrefour est probablement deja lance.
-
-Fermer l'ancienne fenetre du carrefour ou arreter le terminal avec `Ctrl+C`.
-
-## 11. Arreter la simulation
-
-Pour arreter les clients ou le script automatique :
-
-```text
-Ctrl+C
-```
-
-Pour arreter le serveur, fermer la fenetre graphique ou faire `Ctrl+C` dans le terminal.
-
-## 12. Commandes utiles
-
-| Action | Commande |
+| Chemin | Utilité |
 |---|---|
-| Installer les dependances du serveur | `pip install -r server/requirements.txt` |
-| Lancer le serveur | `python -m server.carrefour` |
-| Lancer les voitures | `python -m client.voiture 3` |
-| Lancer une urgence | `python -m client.urgence Ambulance N` |
-| Lancer serveur et clients | `./lancer_simulation.sh 3 0.4` |
-| Lancer seulement les clients avec le serveur local deja actif | `./lancer_simulation.sh --clients-only 3 0.4` |
-| Lancer les clients depuis un dossier client copie | `./client/lancer_simulation.sh 3 0.4` |
-| Lancer les tests | `python -m unittest discover -s tests` |
+| `/usr/share/sae302/server/` | Code serveur, installé en lecture seule pour l'utilisateur |
+| `/usr/share/sae302/client/` | Code client |
+| `/usr/bin/sae302-*` | Lanceurs |
+| `/etc/sae302/server.conf` | Adresse d'écoute, port, chemin SQLite facultatif |
+| `/etc/sae302/client.conf` | Adresse et port du serveur |
+| `/usr/share/doc/sae302-server/` et `/usr/share/doc/sae302-client/` | Documentation et licence |
+| `~/.local/share/sae302/carrefour.sqlite3` | Base de l'utilisateur qui lance le serveur |
 
-## 13. Verification avant rendu
+Si `XDG_DATA_HOME` est défini, la base est placée dans
+`$XDG_DATA_HOME/sae302/carrefour.sqlite3`. Une variable `SAE302_DB_PATH` dans
+`server.conf` permet de choisir un autre chemin absolu accessible en écriture.
+La base et sa table sont créées au premier lancement. Les compteurs de l'interface
+repartent à zéro au redémarrage, les passages enregistrés dans SQLite restent.
 
-Avant de rendre le projet, verifier :
+Pour sauvegarder, arrêter le serveur, puis copier sa base :
 
-- l'environnement virtuel se cree correctement ;
-- `pip install -r server/requirements.txt` fonctionne ;
-- le serveur se lance ;
-- les voitures se connectent ;
-- l'urgence demande la priorite ;
-- les tests passent ;
-- la documentation est presente.
+```bash
+cp ~/.local/share/sae302/carrefour.sqlite3 ~/carrefour-sauvegarde.sqlite3
+```
+
+## 7. Mise à jour et désinstallation
+
+Pour une nouvelle version, reconstruire depuis les sources actualisées :
+
+```bash
+python3 packaging/build_deb.py --version 1.0.1
+```
+
+Arrêter les clients et le serveur, transférer les nouveaux paquets, puis installer
+le paquet correspondant avec `sudo apt install ./sae302-…_1.0.1_all.deb` sur chaque
+VM. Les deux composants doivent utiliser la même version du protocole. Les
+fichiers de `/etc/sae302` sont déclarés comme fichiers de configuration Debian :
+APT/dpkg gère leur conservation et demande quoi faire en cas de conflit.
+
+Sur chaque VM, selon le paquet installé :
+
+```bash
+sudo apt remove sae302-client
+# Sur la VM serveur :
+sudo apt remove sae302-server
+```
+
+`apt purge` supprime aussi la configuration système du paquet concerné. La base
+dans le dossier personnel est conservée, même après une purge.
+
+## 8. Installation depuis les sources (alternative)
+
+Cette méthode permet de développer sans installer de paquet. Copier `server/`
+sur la VM serveur et `client/` sur la VM client, ou cloner le dépôt complet :
+
+```bash
+sudo apt update
+sudo apt install git python3
+git clone https://github.com/glufy100/SAE302main.git
+cd SAE302main
+```
+
+Sur la VM serveur, installer les bindings Qt fournis par Debian puis lancer
+depuis la session graphique :
+
+```bash
+sudo apt install python3-pyside6.qtwidgets
+python3 -m server.carrefour
+```
+
+Sur la VM client, depuis la racine des sources :
+
+```bash
+export SAE302_HOST=192.168.56.10
+export SAE302_PORT=5050
+bash client/lancer_simulation.sh 3 0.4
+```
+
+Si seul le dossier client a été copié, se placer dedans et utiliser
+`bash lancer_simulation.sh 3 0.4`. Si seul le dossier serveur a été copié, utiliser
+`python3 carrefour.py` depuis ce dossier. Les programmes lancés directement ne
+lisent pas `/etc/sae302/*.conf` : exporter les variables ou modifier les valeurs
+de repli dans `client/config.py` et `server/config.py`. Sans `SAE302_DB_PATH`, le
+serveur lancé depuis les sources utilise `server/data/carrefour.sqlite3`.
+
+Pour retrouver la version PySide6 épinglée pour le développement (6.9.2), utiliser
+un environnement virtuel à la place des bindings système :
+
+```bash
+sudo apt install python3-venv
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r server/requirements.txt
+python -m server.carrefour
+```
+
+Les paquets `.deb` utilisent PySide6 fourni par Debian 13 (6.8.2.1), via
+[`python3-pyside6.qtwidgets`](https://packages.debian.org/trixie/python3-pyside6.qtwidgets),
+qui dépend de QtCore et QtGui. Aucun `pip install` système n'est nécessaire.
+
+## 9. Dépannage et vérification
+
+| Symptôme | Vérification / correction |
+|---|---|
+| Connexion refusée | Démarrer le serveur, vérifier `ss -ltn 'sport = :5050'` et le port configuré |
+| Délai de connexion dépassé | Vérifier les IP, le réseau virtuel, le routage et le pare-feu |
+| Erreur Qt / absence d'affichage | Ouvrir une session de bureau sur la VM serveur ; lancer sans sudo depuis son terminal |
+| `No module named PySide6` | Pour le paquet, utiliser `sae302-server` et vérifier `apt install python3-pyside6.qtwidgets` ; pour un venv, installer ses requirements |
+| Port déjà occupé | Fermer l'ancienne instance du serveur |
+| SQLite non accessible en écriture | Lancer sous l'utilisateur normal et vérifier `SAE302_DB_PATH` et les droits du répertoire parent |
+| APT ne trouve pas un paquet local | Se placer dans le bon dossier et conserver le préfixe `./` devant le `.deb` |
+
+Sur une machine Debian 13 possédant le dépôt complet et PySide6 :
+
+```bash
+python3 -m unittest discover -s tests
+python3 packaging/build_deb.py
+dpkg-deb --info dist/sae302-server_1.0.0_all.deb
+dpkg-deb --contents dist/sae302-client_1.0.0_all.deb
+```
+
+La validation finale du déploiement consiste à installer les paquets sur les deux
+VM, recevoir `TRAJETS|...`, voir les véhicules dans les deux onglets et vérifier
+l'enregistrement des passages après le lancement d'une ambulance.

@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 
-from server.config import POSITION_ATTENTE_GAUCHE
-
 @dataclass
 class Vehicule:
-    """Represente un vehicule connu du carrefour."""
+    """Donnees recues du client ; aucun calcul de conduite cote serveur."""
 
     nom: str
     type_vehicule: str
@@ -19,15 +17,5 @@ class Vehicule:
     retour_voie: bool = False
     depassement_droite: bool = False
     preparation_depassement: float = 1.0
-
-    def virage_gauche_entame(self) -> bool:
-        """La voiture a deja commence a tourner et libere la file tout droit."""
-        return self.manoeuvre == "GAUCHE" and self.progression >= POSITION_ATTENTE_GAUCHE
-
-    def direction_sortie(self) -> str:
-        """Donne la route prise apres le carrefour."""
-        if self.manoeuvre == "DROITE":
-            return {"N": "O", "O": "S", "S": "E", "E": "N"}[self.direction]
-        if self.manoeuvre == "GAUCHE":
-            return {"N": "E", "E": "S", "S": "O", "O": "N"}[self.direction]
-        return {"N": "S", "S": "N", "E": "O", "O": "E"}[self.direction]
+    dans_carrefour: bool = False
+    position_affichage: tuple | None = None

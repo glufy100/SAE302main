@@ -1,5 +1,7 @@
 """Verifie les trajets du T et leur separation du carrefour en croix."""
 
+from dataclasses import asdict
+import json
 import contextlib
 import io
 import socket
@@ -11,8 +13,8 @@ from client.client_vehicule import get_trajets, simuler_vehicule
 from client.voiture import simuler_voiture
 from server.model.EtatCarrefour import EtatCarrefour
 from server.model.ServeurCarrefour import ServeurCarrefour
-from server.model.TrajectoireVehicule import TrajectoireVehicule
-from server.model.Vehicule import Vehicule
+from client.trajectoire import TrajectoireVehicule
+from client.vehicule import Vehicule
 
 
 class TraficTTest(unittest.TestCase):
@@ -49,7 +51,10 @@ class TraficTTest(unittest.TestCase):
         serveur = ServeurCarrefour(etat)
         for direction, manoeuvre in (('N', 'TOUT_DROIT'), ('S', 'TOUT_DROIT'),
                                      ('E', 'DROITE'), ('O', 'GAUCHE')):
-            self.assertIsNone(serveur._creer_vehicule('Test', 'voiture', direction, manoeuvre, 0))
+            voiture = Vehicule('Test', 'voiture', direction, '1', manoeuvre=manoeuvre,
+                               position_affichage=(100, 100, 0, 32, 20.8))
+            with self.assertRaises(ValueError):
+                serveur._enregistrer_rapport(json.dumps({'revision': etat.revision, 'vehicule': asdict(voiture)}))
         self.assertEqual({}, etat.vehicules)
         for _ in range(20):
             etat.avancer_cycle()
@@ -88,7 +93,12 @@ class TraficTTest(unittest.TestCase):
                     with client.makefile('r', encoding='utf-8') as lecteur:
                         client.sendall(b'CARREFOUR|T\n')
                         self.assertEqual('OK', lecteur.readline().strip())
-                        client.sendall(b'IDENTITE|Interdite|voiture|E|DROITE|0\n')
+                        client.sendall(b'INSTANTANE\n')
+                        instantane = json.loads(lecteur.readline().split('|', 1)[1])
+                        interdite = Vehicule('Interdite', 'voiture', 'E', '', manoeuvre='DROITE',
+                                             position_affichage=(100, 100, 0, 32, 20.8))
+                        paquet = json.dumps({'revision': instantane['revision'], 'vehicule': asdict(interdite)})
+                        client.sendall(('IDENTITE|' + paquet + '\n').encode())
                         self.assertTrue(lecteur.readline().startswith('ERREUR|'))
         finally:
             get_trajets.cache_clear()
