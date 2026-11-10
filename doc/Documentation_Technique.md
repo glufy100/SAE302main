@@ -47,8 +47,11 @@ SAE302/
 │   │   ├── EtatCarrefour.py
 │   │   ├── FenetreCarrefour.py
 │   │   ├── ServeurCarrefour.py
-│   │   ├── Vehicule.py
-│   │   └── VueCarrefour.py
+│   │   ├── Vehicule.py         # Données reçues des clients
+│   │   ├── VueCarrefourBase.py  # Dessin des poses reçues
+│   │   ├── VueCarrefour.py
+│   │   ├── VueCarrefourT.py
+│   │   └── OngletCarrefourT.py
 │   └── data/                 # Cree au lancement, contient carrefour.sqlite3
 ├── client/
 │   ├── voiture.py
@@ -61,11 +64,13 @@ SAE302/
 │   ├── config.py
 │   └── lancer_simulation.sh
 ├── tests/
-│   └── test_separation.py
+│   ├── test_separation.py      # Autonomie des rôles et protocole TCP
+│   ├── test_packaging.py       # Archives et configuration Debian
+│   └── …                       # Conduite, affichage et statistiques
 ├── packaging/
 │   ├── build_deb.py          # Construction des paquets client et serveur
 │   └── debian/               # Configurations système par rôle
-├── dist/                     # Paquets générés (ignorés par Git)
+├── dist/                     # Paquets .deb publiés et empreintes SHA-256
 └── doc/
     ├── Installation.md
     ├── Documentation_Technique.md
@@ -89,9 +94,7 @@ Le client utilise Python standard. Le serveur se lance sous l'utilisateur de la
 session graphique, sans service systemd. Le [guide d'installation](Installation.md)
 détaille le déploiement et sa vérification.
 
-Pour un environnement de développement depuis les sources :
-
-Depuis la racine du projet :
+Pour un environnement de développement, depuis la racine des sources :
 
 ```bash
 python3 -m venv .venv
@@ -167,6 +170,12 @@ Les coordonnees sont calculees par le client dans une scene logique de 1000 par 
 
 ## 7. Protocole TCP
 
+Le serveur utilise IPv4 (`AF_INET`) et TCP (`SOCK_STREAM`). Un thread accepte les
+connexions et un thread traite chaque connexion cliente. Chaque véhicule conserve
+sa connexion pendant son trajet ; les générateurs interrogent aussi `GET_TRAJETS`
+sur des connexions courtes. Les échanges sont encodés en UTF-8.
+
+
 Chaque message se termine par un retour a la ligne. Le premier `|` separe la commande du contenu JSON, lorsqu'il existe.
 
 | Commande | Contenu | Reponse |
@@ -185,6 +194,19 @@ Un rapport contient `revision` et `vehicule`. Le vehicule porte son identite, so
 L'instantane contient la revision, les feux, les trajets, la geometrie fixe de la scene et les etats des vehicules. Une modification du trafic ou des feux augmente la revision. Une mise a jour du seul compteur d'attente ne la modifie pas.
 
 Le serveur compare la revision avant de stocker un rapport, sous verrou. Si elle a change, il repond `REESSAYER` : le client recupere un nouvel instantane et refait ses calculs. Cela evite que deux clients publient des mouvements calcules sur une situation devenue ancienne. Le serveur controle le format et l'identite de connexion ; tous les controles de conduite sont executes par les clients.
+
+À l'inscription, le client envoie tous les champs du modèle `client.vehicule.Vehicule`.
+Le serveur attribue `identifiant_affichage` (de 1 à 9, réutilisé cycliquement) et le
+conserve lors des mises à jour. Les champs d'identité ne peuvent pas changer sur
+une même connexion. Le compteur `temps_attente` doit rester croissant et les
+valeurs numériques doivent être finies. Ces vérifications portent sur le rapport,
+sans recalculer la conduite.
+
+Le client peut repartir de progressions négatives pour représenter une file en
+amont du carrefour. Un passage n'est enregistré que sur `TERMINE` à progression
+100. Si une connexion se ferme avant cette commande, son véhicule est retiré ;
+aucun passage terminé n'est ajouté. Si ce véhicule détenait la priorité pour
+la direction courante, le serveur rétablit le cycle normal.
 
 Une commande invalide produit `ERREUR|message`. L'ancien protocole `POSITION|nombre` n'est plus utilise : il faut redemarrer les clients et le serveur ensemble apres cette mise a jour.
 
@@ -418,7 +440,35 @@ Le serveur écoute par défaut sur `0.0.0.0:5050` ; le client doit cibler l'IP r
 de la VM serveur. Aucun module serveur n'est installé dans le paquet client, ni
 module client dans le paquet serveur. Le réseau de TP doit autoriser TCP 5050.
 
+### Référence de configuration
+
+| Réglage | Source | Valeur par défaut | Portée |
+|---|---|---|---|
+| `SAE302_HOST` | Environnement ou `client.conf` | `127.0.0.1` dans le code ; `192.168.56.10` dans le modèle du paquet | Adresse IPv4 ou nom DNS du serveur, à adapter pour les deux VM |
+| `SAE302_BIND_HOST` | Environnement ou `server.conf` | `0.0.0.0` | Interface IPv4 d'écoute |
+| `SAE302_PORT` | Environnement ou fichier `.conf` du rôle | `5050` | Même port des deux côtés |
+| `SAE302_DB_PATH` | Environnement ou `server.conf` | Chemin des sources, ou dossier de données utilisateur via le lanceur Debian | Fichier SQLite côté serveur |
+| `LIGNE_ARRET` | `client/config.py` | `30` | Progression de la ligne d'arrêt |
+| `PAS_AVANCEMENT` | `client/config.py` | `1` | Pas de progression proposé |
+| `PAS_SIMULATION` | `client/config.py` | `0.08` seconde | Pause après une publication acceptée |
+
+Les valeurs de conduite sont des constantes Python, sans variable d'environnement
+associée. Une modification de configuration prend effet au prochain lancement
+du programme concerné. Pour les paquets, modifier les fichiers sous `/etc/sae302`
+pour les réglages réseau ; une mise à jour du code installé peut remplacer toute
+modification manuelle sous `/usr/share/sae302`.
+
 ## 17. Tests
+
+Les 55 tests ont réussi sous macOS avec Python 3.11.9 et PySide6 6.9.2. La cible
+de déploiement reste Debian 13/Python 3.13 ; la recette complète sur les deux VM
+est décrite dans le [guide d'installation](Installation.md#10-état-de-la-validation)
+et reste à exécuter.
+
+`test_packaging.py` contrôle les archives Debian, les rôles embarqués, les
+permissions, les fichiers de configuration, les empreintes internes, la
+reproductibilité des paquets et la configuration par variables d'environnement.
+
 
 La suite couvre les files de voitures, les collisions au redemarrage, les deux types de carrefours, les trajectoires, les virages a gauche, les depassements et le passage des ambulances. Les tests de conduite executent les modules clients.
 
@@ -429,6 +479,12 @@ python3 -m unittest discover -s tests
 ```
 
 ## 18. Limites connues
+
+- Le serveur nécessite une session graphique ; il n'existe pas de mode sans interface.
+- Le protocole TCP n'utilise ni authentification ni chiffrement.
+- Les rapports clients sont considérés comme la source des mouvements ; la révision assure leur ordre de publication, sans vérifier la validité physique des mouvements.
+- Une seule ambulance automatique circule à la fois par générateur ; plusieurs générateurs ou urgences manuelles ne sont pas arbitrés par une file de priorités.
+
 
 - La simulation reste un prototype pour reseau local.
 - Les vehicules ne suivent pas une vraie physique de circulation.

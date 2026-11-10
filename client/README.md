@@ -2,6 +2,8 @@
 
 ## Paquet Debian 13 — VM client
 
+[Télécharger le paquet client](https://github.com/glufy100/SAE302main/raw/refs/heads/main/dist/sae302-client_1.0.0_all.deb), puis se placer dans le dossier du téléchargement.
+
 Sur la VM dédiée aux véhicules :
 
 ```bash

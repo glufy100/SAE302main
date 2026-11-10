@@ -2,6 +2,8 @@
 
 ## Paquet Debian 13 — VM serveur
 
+[Télécharger le paquet server](https://github.com/glufy100/SAE302main/raw/refs/heads/main/dist/sae302-server_1.0.0_all.deb), puis se placer dans le dossier du téléchargement.
+
 La VM serveur doit disposer d'un bureau graphique. Dans un terminal de cette session :
 
 ```bash

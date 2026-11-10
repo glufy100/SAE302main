@@ -31,6 +31,21 @@ le port sur Internet.
 
 ## 2. Obtenir les deux paquets `.deb`
 
+### Paquets déjà publiés
+
+Le dossier [dist du dépôt GitHub](https://github.com/glufy100/SAE302main/tree/main/dist)
+contient les deux paquets prêts à transférer vers les VM :
+
+- [Paquet serveur](https://github.com/glufy100/SAE302main/raw/refs/heads/main/dist/sae302-server_1.0.0_all.deb)
+- [Paquet client](https://github.com/glufy100/SAE302main/raw/refs/heads/main/dist/sae302-client_1.0.0_all.deb)
+- [SHA256SUMS](https://github.com/glufy100/SAE302main/raw/refs/heads/main/dist/SHA256SUMS)
+
+Pour vérifier les téléchargements sous Debian, placer ces trois fichiers dans
+le même dossier, puis exécuter `sha256sum -c SHA256SUMS`. Les deux lignes doivent
+indiquer `OK`. Copier ensuite chaque paquet sur sa VM comme indiqué ci-dessous.
+
+### Reconstruire depuis les sources
+
 Depuis la racine du dépôt, sur la machine qui possède les sources :
 
 ```bash
@@ -301,3 +316,20 @@ dpkg-deb --contents dist/sae302-client_1.0.0_all.deb
 La validation finale du déploiement consiste à installer les paquets sur les deux
 VM, recevoir `TRAJETS|...`, voir les véhicules dans les deux onglets et vérifier
 l'enregistrement des passages après le lancement d'une ambulance.
+
+
+## 10. État de la validation
+
+La suite de 55 tests a réussi sous macOS avec Python 3.11.9 et PySide6 6.9.2.
+Les contrôles des paquets vérifient le format des archives, la séparation des
+rôles, les permissions, les empreintes MD5 internes, les fichiers de configuration,
+la reproductibilité de la construction et les variables d'environnement.
+
+Cette exécution ne valide pas encore l'installation APT ni l'interface avec les
+bindings Qt de Debian 13. La recette sur les deux VM reste à réaliser :
+
+- Installer chaque paquet sur une VM Debian 13 distincte.
+- Lancer le serveur dans une session graphique, sans sudo.
+- Obtenir une réponse `TRAJETS|...` depuis la VM client.
+- Observer le trafic sur la croix et le T, puis le passage prioritaire d'une ambulance.
+- Vérifier que les passages persistent dans SQLite après redémarrage du serveur.
